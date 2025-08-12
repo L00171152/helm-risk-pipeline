@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:base"],
+  "dependencyDashboard": true,
+  "packageRules": [
+    {
+      "matchManagers": ["helmv3"],
+      "groupName": "helm-dependencies",
+      "separateMinorPatch": false,
+      "automerge": false
+    }
+  ]
+}
+
