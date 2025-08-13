@@ -3,16 +3,21 @@ name: SBOM + Trivy Scan
 on:
   pull_request:
     paths:
-      - 'charts/**'   # Only run when Helm charts change
+      - 'charts/**'
+
+permissions:
+  contents: read
 
 jobs:
-  sbom-scan:
+  sbom_trivy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Syft
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install Syft (no sudo)
         run: |
           mkdir -p "$HOME/.local/bin"
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
@@ -20,26 +25,54 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           syft version
 
-
-      - name: Generate SBOM
+      - name: Install Trivy (no sudo)
         run: |
-          syft dir:./charts/myapp -o json > sbom.json
-          echo "SBOM generated at sbom.json"
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          trivy --version
 
-      - name: Install Trivy
+      - name: Generate SBOM (Syft)
+        run: syft dir:./charts/myapp -o json > sbom.json
+
+      - name: Render chart and collect container images
+        id: images
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+          set -euo pipefail
+          mkdir -p /tmp/trivy
+          IMAGES=$(helm template charts/myapp --dependency-update \
+            | grep -Eo 'image:\s*["'\'']?[^"'\''[:space:]]+(:[[:alnum:]\.\-_]+)?' \
+            | awk '{print $2}' | sed 's/"//g' | sort -u || true)
+          echo "Found images:"
+          echo "$IMAGES"
+          IMAGES_CSV=$(echo "$IMAGES" | paste -sd, -)
+          echo "images=$IMAGES_CSV" >> "$GITHUB_OUTPUT"
 
-      - name: Run Trivy Scan on SBOM
+      - name: Scan images with Trivy (if any)
+        if: steps.images.outputs.images != ''
         run: |
-          ./trivy sbom sbom.json --format json --output trivy_report.json
-          echo "Trivy scan complete. Report saved to trivy_report.json"
+          IFS=',' read -ra ARRS <<< "${{ steps.images.outputs.images }}"
+          for img in "${ARRS[@]}"; do
+            echo "Scanning $img"
+            safe=$(echo "$img" | tr '/:' '__')
+            trivy image --scanners vuln --ignore-unfixed \
+              --format json --output "/tmp/trivy/${safe}.json" "$img"
+          done
+          jq -s '.' /tmp/trivy/*.json > trivy_report.json
 
-      - name: Upload Reports
+      - name: Fallback scan of chart filesystem (no images found)
+        if: steps.images.outputs.images == ''
+        run: |
+          trivy fs --scanners vuln --ignore-unfixed \
+            --format json --output trivy_report.json charts/myapp
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
           path: |
             sbom.json
             trivy_report.json
+            /tmp/trivy/*.json
 
