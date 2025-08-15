@@ -1,48 +1,45 @@
-name: sbom-plus-risk
+name: Helm Chart Security Scan
+
 on:
   pull_request:
     branches: [ main ]
+
 jobs:
-  sbom_and_risk:
+  scan-helm:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Syft
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | bash -s -- -b /usr/local/bin
-
-      - name: Generate SBOM (SPDX JSON)
-        # For demo/testing, scan nginx; change to your real app/image as needed
-        run: syft nginx:latest -o spdx-json > sbom.spdx.json
+        run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | bash -s -- -b /usr/local/bin
 
       - name: Install Trivy
+        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Find modified Helm chart directories
+        id: charts
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          dirs=$(git diff --name-only origin/main | grep '^charts/.*/Chart.yaml' | xargs -n1 dirname | uniq)
+          echo "dirs=$dirs" >> $GITHUB_OUTPUT
 
-      - name: Scan SBOM with Trivy
-        run: trivy sbom sbom.spdx.json --format json > trivy.json
+      - name: Generate SBOM & scan each chart
+        if: ${{ steps.charts.outputs.dirs != '' }}
+        run: |
+          for CHART in ${{ steps.charts.outputs.dirs }}
+          do
+            syft dir:$CHART -o spdx-json > sbom.spdx.json
+            trivy sbom sbom.spdx.json --severity HIGH,CRITICAL --format json > trivy.json
+            cat trivy.json
+          done
 
-      - name: Install Python packages
-        run: pip install epss-api cvss
-
-      - name: Compute Risk Score
-        run: python scripts/score.py trivy.json > risk.txt
-
-      - name: Comment on PR
+      - name: Comment Trivy scan summary on PR
+        if: ${{ steps.charts.outputs.dirs != '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr comment ${{ github.event.pull_request.number }} --body "$(cat risk.txt)"
-
-      - name: Upload Trivy Result
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-result
-          path: trivy.json
-
-      - name: Upload Risk Score
-        uses: actions/upload-artifact@v4
-        with:
-          name: risk-result
-          path: risk.txt
-
+        run: |
+          for CHART in ${{ steps.charts.outputs.dirs }}
+          do
+            MSG="## Trivy Results for $CHART\n"
+            MSG+="\n\`\`\`\n$(jq '.Results' trivy.json)\n\`\`\`"
+            gh pr comment ${{ github.event.pull_request.number }} --body "$MSG"
+          done
