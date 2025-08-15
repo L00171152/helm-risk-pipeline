@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: read
+  issues: write        # <-- needed to create a PR (issue) comment
+  pull-requests: write # optional, but fine to keep
 
 jobs:
   sbom_trivy:
@@ -75,9 +77,13 @@ jobs:
         run: python scripts/risk_analysis.py
 
       - name: Comment on PR with Risk
+        if: github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pass token explicitly
         with:
           path: risk_summary.txt
+          recreate: true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
