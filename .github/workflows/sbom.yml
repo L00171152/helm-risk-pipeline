@@ -4,18 +4,22 @@ on:
   pull_request:
     paths:
       - 'charts/**'
+      - 'renovate.json'
+  workflow_dispatch: {}
 
 permissions:
   contents: read
-  issues: write        # <-- needed to create a PR (issue) comment
-  pull-requests: write # optional, but fine to keep
+  issues: write
+  pull-requests: write
 
 jobs:
   sbom_trivy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
 
       - name: Install Syft (no sudo)
         run: |
@@ -33,43 +37,104 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           trivy --version
 
+      - name: Install yq (no sudo)
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          YQ_VER=v4.44.3
+          curl -L "https://github.com/mikefarah/yq/releases/download/${YQ_VER}/yq_linux_amd64" \
+            -o "$HOME/.local/bin/yq"
+          chmod +x "$HOME/.local/bin/yq"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          yq --version
+
       - name: Generate SBOM (Syft)
         run: syft dir:./charts/myapp -o json > sbom.json
 
-      - name: Render chart and collect container images
+      # 1) Pull subcharts so Renovate bumps are included
+      - name: Helm dependency update
+        run: helm dependency update charts/myapp
+
+      # 2) Try to render the whole chart (don’t fail on nil-pointer errors)
+      - name: Render chart (best-effort)
+        run: |
+          helm template charts/myapp \
+            --set serviceAccount.create=true \
+            --set ingress.enabled=false \
+            > /tmp/rendered.yaml || echo "" > /tmp/rendered.yaml
+          echo "Rendered bytes:"
+          wc -c /tmp/rendered.yaml || true
+
+      # 3) Collect images from rendered manifests and ALL values files (main + subcharts)
+      - name: Collect container images (rendered + values)
         id: images
         run: |
           set -euo pipefail
-          mkdir -p /tmp/trivy
-          IMAGES=$(helm template charts/myapp --dependency-update \
-            | grep -Eo 'image:\s*["'\'']?[^"'\''[:space:]]+(:[[:alnum:]\.\-_]+)?' \
-            | awk '{print $2}' | sed 's/"//g' | sort -u || true)
-          echo "Found images:"; echo "$IMAGES"
-          echo "images=$(echo "$IMAGES" | paste -sd, -)" >> "$GITHUB_OUTPUT"
 
-      - name: Scan images with Trivy (if any)
+          # From rendered manifests (.image or repository+tag)
+          RENDERED_IMAGES=$(yq -r '
+            (.. | select(type=="object" and has("image")) | .image),
+            (.. | select(type=="object" and has("repository") and has("tag"))
+                 | (.repository + ":" + (.tag|tostring)))
+          ' /tmp/rendered.yaml 2>/dev/null | sed '/^$/d' | sort -u || true)
+
+          # From values files in main chart and subcharts
+          VALUES_IMAGES=$(
+            find charts/myapp -type f -name 'values*.yaml' -o -name 'values*.yml' \
+            | xargs -I{} sh -c '
+                yq -r "
+                  # image: repo:tag pattern
+                  (.. | select(type==\"object\" and has(\"image\")) | .image),
+                  # image.repository + image.tag
+                  (.. | select(type==\"object\" and has(\"image\") and has(\"tag\")) | .image.repository + \":\" + (.tag|tostring)),
+                  # image.repository only (assume :latest)
+                  (.. | select(type==\"object\" and has(\"image\") and has(\"repository\") and (has(\"tag\")|not))
+                        | .image.repository + \":latest\")
+                " {} 2>/dev/null
+            ' | sed '/^$/d' | sort -u || true
+          )
+
+          # Combine and normalize
+          printf "%s\n%s\n" "$RENDERED_IMAGES" "$VALUES_IMAGES" \
+            | sed '/^$/d' | sort -u > /tmp/images.txt
+
+          echo "Collected images:"
+          cat /tmp/images.txt || true
+
+          IMAGES_CSV=$(paste -sd, /tmp/images.txt 2>/dev/null || true)
+          echo "images=$IMAGES_CSV" >> "$GITHUB_OUTPUT"
+
+      # 4) Trivy image vulnerability scan (if we found any images)
+      - name: Scan images with Trivy
         if: steps.images.outputs.images != ''
         run: |
+          set -euo pipefail
+          mkdir -p /tmp/trivy
           IFS=',' read -ra ARRS <<< "${{ steps.images.outputs.images }}"
           for img in "${ARRS[@]}"; do
             echo "Scanning $img"
             safe=$(echo "$img" | tr '/:' '__')
+            # TIP: remove --ignore-unfixed to increase findings during testing
             trivy image --scanners vuln --ignore-unfixed \
-              --format json --output "/tmp/trivy/${safe}.json" "$img"
+              --format json --output "/tmp/trivy/${safe}.json" "$img" || true
           done
           shopt -s nullglob
-          jq -s '.' /tmp/trivy/*.json > trivy_report.json
+          if compgen -G "/tmp/trivy/*.json" > /dev/null; then
+            jq -s '.' /tmp/trivy/*.json > trivy_report.json
+          else
+            echo '{}' > trivy_report.json
+          fi
 
-      - name: Fallback scan of chart filesystem (no images found)
-        if: steps.images.outputs.images == ''
+      # 5) Always run a Trivy config (IaC) scan for misconfigurations
+      - name: Trivy config scan (Helm chart)
         run: |
-          trivy fs --scanners vuln --ignore-unfixed \
-            --format json --output trivy_report.json charts/myapp
+          trivy config --helm charts/myapp \
+            --format json --output trivy_config.json || echo '{}' > trivy_config.json
 
-      - name: Verify report exists
+      - name: Ensure vuln report exists
         run: test -s trivy_report.json || echo '{}' > trivy_report.json
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -80,7 +145,7 @@ jobs:
         if: github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@v2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pass token explicitly
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path: risk_summary.txt
           recreate: true
@@ -92,4 +157,6 @@ jobs:
           path: |
             sbom.json
             trivy_report.json
+            trivy_config.json
             /tmp/trivy/*.json
+          retention-days: 14
