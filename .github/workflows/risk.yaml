@@ -10,12 +10,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: trivy-scan
+          name: trivy-result
       - uses: actions/checkout@v4
       - name: Install Python packages
         run: pip install epss-api cvss
       - name: Compute Risk Score
-        run: python scripts/score.py trivy.json > risk.txt
+        run: python scripts/score.py trivy-result/trivy.json > risk.txt
       - name: Comment on PR
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
