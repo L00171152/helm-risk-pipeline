@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Syft
         run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | bash -s -- -b /usr/local/bin
@@ -19,7 +21,9 @@ jobs:
       - name: Find modified Helm chart directories
         id: charts
         run: |
-          dirs=$(git diff --name-only origin/main | grep '^charts/.*/Chart.yaml' | xargs -n1 dirname | uniq)
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          git fetch origin $BASE_BRANCH
+          dirs=$(git diff --name-only origin/$BASE_BRANCH...HEAD | grep '^charts/.*/Chart.yaml' | xargs -r -n1 dirname | uniq)
           echo "dirs=$dirs" >> $GITHUB_OUTPUT
 
       - name: Generate SBOM & scan each chart
