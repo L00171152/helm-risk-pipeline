@@ -51,40 +51,34 @@ jobs:
           set -euo pipefail
           SUMMARY="risk_summary.txt"
           : > "$SUMMARY"
-
+              
           for CHART in ${{ steps.charts.outputs.dirs }}; do
             echo "==> Processing $CHART"
-            # ensure subcharts present (covers Renovate bumps)
             helm dependency update "$CHART" || helm dependency build "$CHART"
-
-            # render with safe defaults to avoid nil-pointer template errors
+              
             RENDERED=$(mktemp)
             if ! helm template "$CHART" \
-                --dependency-update \
-                --set serviceAccount.create=true \
-                --set ingress.enabled=false \
-                --set autoscaling.enabled=false > "$RENDERED"; then
+                  --dependency-update \
+                  --set serviceAccount.create=true \
+                  --set ingress.enabled=false \
+                  --set autoscaling.enabled=false > "$RENDERED"; then
               echo "::warning title=Helm render failed::Skipping $CHART (render error)"
               continue
             fi
-
-            # extract images from rendered manifests
+              
             IMAGES=$(grep -Eo 'image:\s*["'\'']?[^"'\''[:space:]]+(:[[:alnum:]\.\-_]+)?' "$RENDERED" \
                      | awk '{print $2}' | sed 's/"//g' | sort -u || true)
-
-            echo "Images for $CHART:"
-            echo "$IMAGES"
-
+            echo "Images for $CHART:"; echo "$IMAGES"
+              
             REPORT="trivy-$(basename "$CHART").json"
             : > "$REPORT"
-
+              
             if [ -n "$IMAGES" ]; then
               mkdir -p /tmp/trivy
               rm -f /tmp/trivy/*.json 2>/dev/null || true
               for img in $IMAGES; do
                 echo "Scanning $img"
                 safe=$(echo "$img" | tr '/:' '__')
-                # Use --scanners vuln only; adjust severity as you like
                 trivy image --scanners vuln --severity HIGH,CRITICAL \
                   --format json --output "/tmp/trivy/${safe}.json" "$img" || true
               done
@@ -92,8 +86,7 @@ jobs:
             else
               echo '{}' > "$REPORT"
             fi
-
-            # add a tiny per-chart summary
+              
             echo "### $(basename "$CHART")" >> "$SUMMARY"
             jq -r '
               def vulns: [.[]? | .Results[]? | .Vulnerabilities[]?];
@@ -103,10 +96,10 @@ jobs:
             ' "$REPORT" >> "$SUMMARY"
             echo "" >> "$SUMMARY"
           done
-
-          # keep for the PR comment step
+              
           cp "$SUMMARY" risk_summary.txt
           test -s risk_summary.txt || echo "No charts with images found." > risk_summary.txt
+
 
       # Optional: fail the job if any HIGH/CRITICAL are found (uncomment to enforce)
       # - name: Fail when HIGH/CRITICAL found
