@@ -18,6 +18,9 @@ jobs:
       - name: Install Trivy
         run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
+      - name: Install Python packages
+        run: pip install epss-api cvss
+
       - name: Find modified Helm chart directories
         id: charts
         run: |
@@ -26,24 +29,48 @@ jobs:
           dirs=$(git diff --name-only origin/$BASE_BRANCH...HEAD | grep '^charts/.*/Chart.yaml' | xargs -r -n1 dirname | uniq)
           echo "dirs=$dirs" >> $GITHUB_OUTPUT
 
-      - name: Generate SBOM & scan each chart
+      - name: Generate SBOM, Trivy scan, and risk score for each chart
         if: ${{ steps.charts.outputs.dirs != '' }}
         run: |
-          for CHART in ${{ steps.charts.outputs.dirs }}
+          dirs="${{ steps.charts.outputs.dirs }}"
+          for CHART in $dirs
           do
             syft dir:$CHART -o spdx-json > sbom.spdx.json
             trivy sbom sbom.spdx.json --severity HIGH,CRITICAL --format json > trivy.json
+            # Save result per chart
+            cp trivy.json "trivy-$(basename $CHART).json"
+            python3 scripts/score.py trivy.json > risk.txt
+            # Save risk per chart
+            cp risk.txt "risk-$(basename $CHART).txt"
             cat trivy.json
+            cat risk.txt
           done
 
-      - name: Comment Trivy scan summary on PR
+      - name: Comment Trivy scan & risk score on PR
         if: ${{ steps.charts.outputs.dirs != '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for CHART in ${{ steps.charts.outputs.dirs }}
+          dirs="${{ steps.charts.outputs.dirs }}"
+          for CHART in $dirs
           do
             MSG="## Trivy Results for $CHART\n"
             MSG+="\n\`\`\`\n$(jq '.Results' trivy.json)\n\`\`\`"
+            MSG+="\n\n## Risk Score\n"
+            MSG+="\n\`\`\`\n$(cat risk.txt)\n\`\`\`"
             gh pr comment ${{ github.event.pull_request.number }} --body "$MSG"
           done
+
+      - name: Upload Trivy scan results
+        if: ${{ steps.charts.outputs.dirs != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: trivy-*.json
+
+      - name: Upload risk score results
+        if: ${{ steps.charts.outputs.dirs != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: risk-results
+          path: risk-*.txt
