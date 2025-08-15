@@ -9,3 +9,9 @@ service:
   type: ClusterIP
   port: 80
 
+serviceAccount:
+  create: true
+ingress:
+  enabled: false
+autoscaling:
+  enabled: false

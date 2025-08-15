@@ -1,17 +1,19 @@
-name: Helm Chart Security Scan
+name: Helm Image Vulnerability Scan
 
 on:
   pull_request:
-    branches: ["*"]
+    paths:
+      - 'charts/**'
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
+  pull-requests: write    # for PR comment
+  issues: write           # ok for forks too
 
 jobs:
-  scan-helm:
+  scan:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,18 +22,14 @@ jobs:
       - name: Setup Helm
         uses: azure/setup-helm@v4
 
-      - name: Install Trivy & yq (user space)
+      - name: Install Trivy (user space)
         run: |
           set -e
           mkdir -p "$HOME/.local/bin"
           curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
             | sh -s -- -b "$HOME/.local/bin"
-          curl -L "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64" \
-            -o "$HOME/.local/bin/yq"
-          chmod +x "$HOME/.local/bin/yq"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           trivy --version
-          yq --version
 
       - name: Find modified Helm charts
         id: charts
@@ -39,86 +37,66 @@ jobs:
         run: |
           set -euo pipefail
           BASE="${{ github.event.pull_request.base.ref }}"
-          git fetch origin "$BASE"
-          dirs=$(git diff --name-only "origin/$BASE"...HEAD | grep -E '^charts/.+/Chart\.ya?ml$' | xargs -r -n1 dirname | sort -u)
+          git fetch origin "$BASE" --depth=1
+          dirs=$(git diff --name-only "origin/$BASE"...HEAD \
+                 | grep -E '^charts/.+/Chart\.ya?ml$' \
+                 | xargs -r -n1 dirname | sort -u)
           echo "dirs=$dirs" >> "$GITHUB_OUTPUT"
           echo "Changed charts:"; echo "$dirs"
 
-      - name: Scan charts (values-only image scan)
+      - name: Scan images in changed charts
         if: ${{ steps.charts.outputs.dirs != '' }}
         shell: bash
         run: |
           set -euo pipefail
-
-          extract_imgs () {
-            yq -r '
-              # image: "repo:tag"
-              (.. | select(type=="object" and has("image") and (.image|type=="!!str")) | .image),
-              # image: {repository, tag}
-              (.. | select(type=="object" and has("image") and (.image|type=="!!map")
-                           and (.image|has("repository")) and (.image|has("tag")))
-                   | (.image.repository + ":" + (.image.tag|tostring))),
-              # image: {repository} only -> assume :latest
-              (.. | select(type=="object" and has("image") and (.image|type=="!!map")
-                           and (.image|has("repository")) and ((.image|has("tag"))|not))
-                   | (.image.repository + ":latest")),
-              # legacy repo/tag split
-              (.. | select(type=="object" and has("repository") and has("tag"))
-                   | (.repository + ":" + (.tag|tostring)))
-            ' "$1" 2>/dev/null | sed '/^$/d' || true
-          }
-
-          SUMMARY=risk-summary.txt
+          SUMMARY="risk_summary.txt"
           : > "$SUMMARY"
 
           for CHART in ${{ steps.charts.outputs.dirs }}; do
             echo "==> Processing $CHART"
-
-            # Ensure subcharts present (covers Renovate bumps)
+            # ensure subcharts present (covers Renovate bumps)
             helm dependency update "$CHART" || helm dependency build "$CHART"
 
-            TMP=$(mktemp -d)
-            OUT="$TMP/images.txt"; : > "$OUT"
+            # render with safe defaults to avoid nil-pointer template errors
+            RENDERED=$(mktemp)
+            if ! helm template "$CHART" \
+                --dependency-update \
+                --set serviceAccount.create=true \
+                --set ingress.enabled=false \
+                --set autoscaling.enabled=false > "$RENDERED"; then
+              echo "::warning title=Helm render failed::Skipping $CHART (render error)"
+              continue
+            fi
 
-            # main chart values
-            find "$CHART" -maxdepth 1 -type f \( -name 'values*.yaml' -o -name 'values*.yml' \) -print0 \
-              | while IFS= read -r -d '' f; do extract_imgs "$f" >> "$OUT"; done
+            # extract images from rendered manifests
+            IMAGES=$(grep -Eo 'image:\s*["'\'']?[^"'\''[:space:]]+(:[[:alnum:]\.\-_]+)?' "$RENDERED" \
+                     | awk '{print $2}' | sed 's/"//g' | sort -u || true)
 
-            # subchart values (dirs)
-            find "$CHART/charts" -type f \( -name 'values*.yaml' -o -name 'values*.yml' \) 2>/dev/null -print0 \
-              | while IFS= read -r -d '' f; do extract_imgs "$f" >> "$OUT"; done
-
-            # subchart archives
-            shopt -s nullglob
-            for tgz in "$CHART"/charts/*.tgz; do
-              helm show values "$tgz" > "$TMP/vals.yaml" || true
-              extract_imgs "$TMP/vals.yaml" >> "$OUT"
-            done
-
-            sort -u "$OUT" | sed '/^$/d' > "$TMP/images.sorted"
-            echo "Images for $CHART:"; cat "$TMP/images.sorted" || true
+            echo "Images for $CHART:"
+            echo "$IMAGES"
 
             REPORT="trivy-$(basename "$CHART").json"
             : > "$REPORT"
 
-            if [ -s "$TMP/images.sorted" ]; then
+            if [ -n "$IMAGES" ]; then
               mkdir -p /tmp/trivy
               rm -f /tmp/trivy/*.json 2>/dev/null || true
-              while read -r img; do
+              for img in $IMAGES; do
                 echo "Scanning $img"
                 safe=$(echo "$img" | tr '/:' '__')
-                trivy image --scanners vuln --ignore-unfixed \
+                # Use --scanners vuln only; adjust severity as you like
+                trivy image --scanners vuln --severity HIGH,CRITICAL \
                   --format json --output "/tmp/trivy/${safe}.json" "$img" || true
-              done < "$TMP/images.sorted"
+              done
               jq -s '.' /tmp/trivy/*.json > "$REPORT" || echo '{}' > "$REPORT"
             else
               echo '{}' > "$REPORT"
             fi
 
-            # tiny inline summary
+            # add a tiny per-chart summary
             echo "### $(basename "$CHART")" >> "$SUMMARY"
             jq -r '
-              def vulns: [.[]? | .Results[]? | select(.Vulnerabilities) | .Vulnerabilities[]];
+              def vulns: [.[]? | .Results[]? | .Vulnerabilities[]?];
               "Images: " + ( [.[].Results[]? | .Target] | unique | length | tostring ) + "\n" +
               "HIGH: " + ( [vulns[] | select(.Severity=="HIGH")] | length | tostring ) + ", " +
               "CRITICAL: " + ( [vulns[] | select(.Severity=="CRITICAL")] | length | tostring )
@@ -126,9 +104,25 @@ jobs:
             echo "" >> "$SUMMARY"
           done
 
-          cat "$SUMMARY" > risk_summary.txt
+          # keep for the PR comment step
+          cp "$SUMMARY" risk_summary.txt
+          test -s risk_summary.txt || echo "No charts with images found." > risk_summary.txt
 
-      - name: Comment on PR with summary
+      # Optional: fail the job if any HIGH/CRITICAL are found (uncomment to enforce)
+      # - name: Fail when HIGH/CRITICAL found
+      #   if: ${{ steps.charts.outputs.dirs != '' }}
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     H=$(jq '[.[]? | .Results[]? | .Vulnerabilities[]? | select(.Severity=="HIGH")] | length' trivy-*.json 2>/dev/null | paste -sd+ - | bc || echo 0)
+      #     C=$(jq '[.[]? | .Results[]? | .Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' trivy-*.json 2>/dev/null | paste -sd+ - | bc || echo 0)
+      #     echo "HIGH=$H CRITICAL=$C"
+      #     if [ "${H:-0}" -gt 0 ] || [ "${C:-0}" -gt 0 ]; then
+      #       echo "::error::Found $H HIGH and $C CRITICAL vulnerabilities"
+      #       exit 1
+      #     fi
+
+      - name: Comment summary on PR
         if: ${{ steps.charts.outputs.dirs != '' && github.event.pull_request.head.repo.full_name == github.repository }}
         uses: marocchino/sticky-pull-request-comment@v2
         env:
@@ -137,9 +131,10 @@ jobs:
           path: risk_summary.txt
           recreate: true
 
-      - name: Upload artifacts
+      - name: Upload reports
         if: ${{ steps.charts.outputs.dirs != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-results
+          name: trivy-reports
           path: trivy-*.json
+          retention-days: 14
