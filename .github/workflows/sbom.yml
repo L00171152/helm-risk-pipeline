@@ -1,4 +1,4 @@
-name: Helm Image Vulnerability Scan
+name: ATU
 
 on:
   pull_request:
@@ -121,6 +121,7 @@ jobs:
           python-version: '3.10'
         
       - name: Run risk analysis (Python)
+        id: risk
         env:
           TRIVY_REPORT_GLOB: "trivy-*.json"
           RISK_SUMMARY_PATH: "risk_summary.txt"
@@ -131,10 +132,11 @@ jobs:
           # How many CVEs to show per image:
           TOP_FINDINGS_PER_IMAGE: "5"
         run: python scripts/risk_analysis.py
+        continue-on-error: true
 
 
       - name: Comment summary on PR
-        if: ${{ steps.charts.outputs.dirs != '' && github.event.pull_request.head.repo.full_name == github.repository }}
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -143,11 +145,18 @@ jobs:
           recreate: true
 
       - name: Upload reports
-        if: ${{ steps.charts.outputs.dirs != '' }}
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-reports
+          name: security-reports
           path: |
-            trivy-*.json
+            risk_summary.txt
             risk_details.md
-          retention-days: 14
+            trivy-*.json
+        
+      # Now hard-fail the workflow if Python flagged High
+      - name: Fail if risk was High
+        if: steps.risk.outcome == 'failure'
+        run: |
+          echo "Risk level was High — failing required check."
+          exit 1
