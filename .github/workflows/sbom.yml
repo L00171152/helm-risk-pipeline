@@ -51,11 +51,11 @@ jobs:
           set -euo pipefail
           SUMMARY="risk_summary.txt"
           : > "$SUMMARY"
-              
+
           for CHART in ${{ steps.charts.outputs.dirs }}; do
             echo "==> Processing $CHART"
             helm dependency update "$CHART" || helm dependency build "$CHART"
-              
+
             RENDERED=$(mktemp)
             if ! helm template "$CHART" \
                   --dependency-update \
@@ -65,14 +65,14 @@ jobs:
               echo "::warning title=Helm render failed::Skipping $CHART (render error)"
               continue
             fi
-              
+
             IMAGES=$(grep -Eo 'image:\s*["'\'']?[^"'\''[:space:]]+(:[[:alnum:]\.\-_]+)?' "$RENDERED" \
                      | awk '{print $2}' | sed 's/"//g' | sort -u || true)
             echo "Images for $CHART:"; echo "$IMAGES"
-              
+
             REPORT="trivy-$(basename "$CHART").json"
             : > "$REPORT"
-              
+
             if [ -n "$IMAGES" ]; then
               mkdir -p /tmp/trivy
               rm -f /tmp/trivy/*.json 2>/dev/null || true
@@ -86,7 +86,7 @@ jobs:
             else
               echo '{}' > "$REPORT"
             fi
-              
+
             echo "### $(basename "$CHART")" >> "$SUMMARY"
             jq -r '
               def vulns: [.[]? | .Results[]? | .Vulnerabilities[]?];
@@ -96,9 +96,9 @@ jobs:
             ' "$REPORT" >> "$SUMMARY"
             echo "" >> "$SUMMARY"
           done
-              
-          cp "$SUMMARY" risk_summary.txt
-          test -s risk_summary.txt || echo "No charts with images found." > risk_summary.txt
+
+          # no cp needed anymore
+          test -s "$SUMMARY" || echo "No charts with images found." > "$SUMMARY"
 
 
       # Optional: fail the job if any HIGH/CRITICAL are found (uncomment to enforce)
