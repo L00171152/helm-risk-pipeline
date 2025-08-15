@@ -1,11 +1,11 @@
-name: Helm Chart Security Scan
+name: Helm Chart Security and Risk Scan
 
 on:
   pull_request:
     branches: [ "*" ]
 
 jobs:
-  scan-helm:
+  scan-redis-images:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,8 +18,11 @@ jobs:
       - name: Install Trivy
         run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
-      - name: Install Python packages
+      - name: Install Python dependencies
         run: pip install epss-api cvss
+
+      - name: Install jq (for JSON formatting)
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Find modified Helm chart directories
         id: charts
@@ -29,21 +32,27 @@ jobs:
           dirs=$(git diff --name-only origin/$BASE_BRANCH...HEAD | grep '^charts/.*/Chart.yaml' | xargs -r -n1 dirname | uniq)
           echo "dirs=$dirs" >> $GITHUB_OUTPUT
 
-      - name: Generate SBOM, Trivy scan, and risk score for each chart
+      - name: Scan Redis image(s) from Chart.yaml
         if: ${{ steps.charts.outputs.dirs != '' }}
         run: |
           dirs="${{ steps.charts.outputs.dirs }}"
           for CHART in $dirs
           do
-            syft dir:$CHART -o spdx-json > sbom.spdx.json
-            trivy sbom sbom.spdx.json --severity HIGH,CRITICAL --format json > trivy.json
-            # Save result per chart
-            cp trivy.json "trivy-$(basename $CHART).json"
-            python3 scripts/score.py trivy.json > risk.txt
-            # Save risk per chart
-            cp risk.txt "risk-$(basename $CHART).txt"
-            cat trivy.json
-            cat risk.txt
+            # Extract Redis version from dependencies in Chart.yaml
+            REDIS_VER=$(awk '/- name: redis/,/version:/' "$CHART/Chart.yaml" | grep version | head -1 | awk '{print $2}' | tr -d '"')
+            if [ -z "$REDIS_VER" ]; then
+              echo "No Redis version found in $CHART/Chart.yaml, skipping."
+              continue
+            fi
+
+            echo "Scanning bitnami/redis:$REDIS_VER referenced in $CHART"
+            # Run Trivy image scan
+            trivy image --severity HIGH,CRITICAL --format json bitnami/redis:$REDIS_VER > "trivy-redis-${REDIS_VER}.json"
+            cat "trivy-redis-${REDIS_VER}.json"
+
+            # Risk scoring (adjust path to your script!)
+            python3 scripts/score.py "trivy-redis-${REDIS_VER}.json" > "risk-redis-${REDIS_VER}.txt"
+            cat "risk-redis-${REDIS_VER}.txt"
           done
 
       - name: Comment Trivy scan & risk score on PR
@@ -54,10 +63,14 @@ jobs:
           dirs="${{ steps.charts.outputs.dirs }}"
           for CHART in $dirs
           do
-            MSG="## Trivy Results for $CHART\n"
-            MSG+="\n\`\`\`\n$(jq '.Results' trivy.json)\n\`\`\`"
+            REDIS_VER=$(awk '/- name: redis/,/version:/' "$CHART/Chart.yaml" | grep version | head -1 | awk '{print $2}' | tr -d '"')
+            if [ -z "$REDIS_VER" ]; then
+              continue
+            fi
+            MSG="## Trivy Results for Redis $REDIS_VER (referenced in $CHART)\n"
+            MSG+="\n\`\`\`\n$(jq '.Results' trivy-redis-${REDIS_VER}.json)\n\`\`\`"
             MSG+="\n\n## Risk Score\n"
-            MSG+="\n\`\`\`\n$(cat risk.txt)\n\`\`\`"
+            MSG+="\n\`\`\`\n$(cat risk-redis-${REDIS_VER}.txt)\n\`\`\`"
             gh pr comment ${{ github.event.pull_request.number }} --body "$MSG"
           done
 
@@ -66,11 +79,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: trivy-results
-          path: trivy-*.json
+          path: trivy-redis-*.json
 
       - name: Upload risk score results
         if: ${{ steps.charts.outputs.dirs != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: risk-results
-          path: risk-*.txt
+          path: risk-redis-*.txt
