@@ -13,9 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Helm
-        uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v4
 
       - name: Install Syft (no sudo)
         run: |
@@ -44,10 +42,8 @@ jobs:
           IMAGES=$(helm template charts/myapp --dependency-update \
             | grep -Eo 'image:\s*["'\'']?[^"'\''[:space:]]+(:[[:alnum:]\.\-_]+)?' \
             | awk '{print $2}' | sed 's/"//g' | sort -u || true)
-          echo "Found images:"
-          echo "$IMAGES"
-          IMAGES_CSV=$(echo "$IMAGES" | paste -sd, -)
-          echo "images=$IMAGES_CSV" >> "$GITHUB_OUTPUT"
+          echo "Found images:"; echo "$IMAGES"
+          echo "images=$(echo "$IMAGES" | paste -sd, -)" >> "$GITHUB_OUTPUT"
 
       - name: Scan images with Trivy (if any)
         if: steps.images.outputs.images != ''
@@ -59,10 +55,19 @@ jobs:
             trivy image --scanners vuln --ignore-unfixed \
               --format json --output "/tmp/trivy/${safe}.json" "$img"
           done
+          shopt -s nullglob
           jq -s '.' /tmp/trivy/*.json > trivy_report.json
-      
-      - name: Setup Python
-        uses: actions/setup-python@v4
+
+      - name: Fallback scan of chart filesystem (no images found)
+        if: steps.images.outputs.images == ''
+        run: |
+          trivy fs --scanners vuln --ignore-unfixed \
+            --format json --output trivy_report.json charts/myapp
+
+      - name: Verify report exists
+        run: test -s trivy_report.json || echo '{}' > trivy_report.json
+
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -74,12 +79,6 @@ jobs:
         with:
           path: risk_summary.txt
 
-      - name: Fallback scan of chart filesystem (no images found)
-        if: steps.images.outputs.images == ''
-        run: |
-          trivy fs --scanners vuln --ignore-unfixed \
-            --format json --output trivy_report.json charts/myapp
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -88,4 +87,3 @@ jobs:
             sbom.json
             trivy_report.json
             /tmp/trivy/*.json
-
