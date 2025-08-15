@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vuln-demo
+  labels:
+    app: vuln-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vuln-demo
+  template:
+    metadata:
+      labels:
+        app: vuln-demo
+    spec:
+      hostNetwork: true                     # misconfig (Trivy config: HIGH)
+      containers:
+        - name: demo
+          image: ubuntu:18.04               # old image -> many CVEs
+          command: ["sleep", "3600"]
+          securityContext:
+            privileged: true                 # HIGH/CRITICAL misconfig
+            allowPrivilegeEscalation: true
+            runAsUser: 0                     # root
+            readOnlyRootFilesystem: false
+          resources: {}                      # no limits (warn)
