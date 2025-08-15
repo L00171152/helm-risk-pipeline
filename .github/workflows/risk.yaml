@@ -2,7 +2,7 @@ name: Helm Chart Security Scan
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ "*" ]
 
 jobs:
   scan-helm:
