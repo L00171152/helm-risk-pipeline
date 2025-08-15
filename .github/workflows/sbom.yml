@@ -115,6 +115,24 @@ jobs:
       #       exit 1
       #     fi
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+        
+      - name: Run risk analysis (Python)
+        env:
+          TRIVY_REPORT_GLOB: "trivy-*.json"
+          RISK_SUMMARY_PATH: "risk_summary.txt"
+          RISK_DETAILS_PATH: "risk_details.md"
+          # Optional hard gates:
+          # FAIL_ON_HIGH: "100"
+          # FAIL_ON_CRIT: "10"
+          # How many CVEs to show per image:
+          TOP_FINDINGS_PER_IMAGE: "5"
+        run: python scripts/risk_analysis.py
+
+
       - name: Comment summary on PR
         if: ${{ steps.charts.outputs.dirs != '' && github.event.pull_request.head.repo.full_name == github.repository }}
         uses: marocchino/sticky-pull-request-comment@v2
@@ -129,5 +147,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: trivy-reports
-          path: trivy-*.json
+          path: |
+            trivy-*.json
+            risk_details.md
           retention-days: 14
