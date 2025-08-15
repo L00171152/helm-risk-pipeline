@@ -23,6 +23,7 @@ jobs:
         run: trivy sbom sbom.spdx.json --format json > trivy.json
 
       - name: Upload Trivy Result
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-result
