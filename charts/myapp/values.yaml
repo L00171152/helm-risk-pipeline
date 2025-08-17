@@ -11,7 +11,31 @@ service:
 
 serviceAccount:
   create: true
+
 ingress:
   enabled: false
+
 autoscaling:
   enabled: false
+
+# Bitnami PostgreSQL subchart
+postgresql:
+  auth:
+    postgresPassword: "mysecret"
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# Bitnami MySQL subchart
+mysql:
+  auth:
+    rootPassword: "supersecret"
+    database: "mydb"
+    username: "myuser"
+    password: "mypassword"
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+

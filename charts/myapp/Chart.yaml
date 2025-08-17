@@ -8,4 +8,9 @@ dependencies:
   - name: redis
     version: "17.12.0"
     repository: "https://charts.bitnami.com/bitnami"
-
+  - name: postgresql
+    version: "15.5.17"
+    repository: "https://charts.bitnami.com/bitnami"
+  - name: mysql
+    version: "12.2.1"
+    repository: "https://charts.bitnami.com/bitnami"
