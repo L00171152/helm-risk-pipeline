@@ -6,11 +6,11 @@ version: 0.1.0
 appVersion: "1.0.0"
 dependencies:
   - name: redis
-    version: "20.5.0"
+    version: "20.13.4"
     repository: "https://charts.bitnami.com/bitnami"
   - name: postgresql
-    version: "15.5.17"
+    version: "15.5.38"
     repository: "https://charts.bitnami.com/bitnami"
   - name: mysql
-    version: "12.2.1"
+    version: "12.3.5"
     repository: "https://charts.bitnami.com/bitnami"
