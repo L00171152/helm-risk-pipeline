@@ -22,8 +22,16 @@ A minimal verification checklist is at the end of this README.
 ---
 
 ## 1) Architecture
+<!-- Standard Markdown -->
+![Architecture: GitHub → CI → ArgoCD → AKS](images/architecture.png)
 
-```mermaid
+<!-- Center + size control (uses HTML, which GitHub supports) -->
+<p align="center">
+  <img src="images/architecture.png" alt="Architecture: GitHub → CI → ArgoCD → AKS" width="720">
+  <br><em>Figure: GitOps flow from GitHub to ArgoCD and AKS.</em>
+</p>
+
+```
 flowchart LR
   A[GitHub Repo<br/>helm-risk-pipeline] -->|PR opened| B[CI: Syft → Trivy → Risk Gate]
   B -- pass --> C[Merge to main]
