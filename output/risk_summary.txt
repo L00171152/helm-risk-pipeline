@@ -1,13 +1,19 @@
 ## Dependency Risk Analysis
-**Overall Risk Score:** 98
+**Overall Risk Score:** 180
 **Overall Risk Level:** High
 
 ### Totals
-- CRITICAL: **14**, HIGH: **56**, MEDIUM: 0, LOW: 0, UNKNOWN: 0
+- CRITICAL: **20**, HIGH: **120**, MEDIUM: 0, LOW: 0, UNKNOWN: 0
 
 ### By Image (top 10)
-- `nginx:1.25 (debian 12.5)` → CRIT 13, HIGH 44, MED 0, LOW 0
-- `docker.io/bitnami/redis:8.0.3-debian-12-r1 (debian 12.11)` → CRIT 1, HIGH 10, MED 0, LOW 0
+- `nginx:1.25 (debian 12.5)` → CRIT 13, HIGH 45, MED 0, LOW 0
+- `docker.io/bitnami/postgresql:16.3.0-debian-12-r19 (debian 12.6)` → CRIT 5, HIGH 35, MED 0, LOW 0
+- `docker.io/bitnami/mysql:8.4.3-debian-12-r5 (debian 12.8)` → CRIT 1, HIGH 17, MED 0, LOW 0
+- `docker.io/bitnami/redis:7.4.3-debian-12-r0 (debian 12.10)` → CRIT 1, HIGH 12, MED 0, LOW 0
+- `opt/bitnami/postgresql` → CRIT 0, HIGH 5, MED 0, LOW 0
+- `opt/bitnami/redis` → CRIT 0, HIGH 2, MED 0, LOW 0
+- `opt/bitnami/common/.spdx-ini-file.spdx` → CRIT 0, HIGH 1, MED 0, LOW 0
+- `opt/bitnami/common/bin/ini-file` → CRIT 0, HIGH 1, MED 0, LOW 0
 - `opt/bitnami/common/.spdx-wait-for-port.spdx` → CRIT 0, HIGH 1, MED 0, LOW 0
 - `opt/bitnami/common/bin/wait-for-port` → CRIT 0, HIGH 1, MED 0, LOW 0
 
