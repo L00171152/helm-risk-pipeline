@@ -1,0 +1,13 @@
+## Dependency Risk Analysis
+**Overall Risk Score:** 98
+**Overall Risk Level:** High
+
+### Totals
+- CRITICAL: **14**, HIGH: **56**, MEDIUM: 0, LOW: 0, UNKNOWN: 0
+
+### By Image (top 10)
+- `nginx:1.25 (debian 12.5)` → CRIT 13, HIGH 44, MED 0, LOW 0
+- `docker.io/bitnami/redis:8.0.3-debian-12-r1 (debian 12.11)` → CRIT 1, HIGH 10, MED 0, LOW 0
+- `opt/bitnami/common/.spdx-wait-for-port.spdx` → CRIT 0, HIGH 1, MED 0, LOW 0
+- `opt/bitnami/common/bin/wait-for-port` → CRIT 0, HIGH 1, MED 0, LOW 0
+
