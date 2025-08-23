@@ -22,8 +22,6 @@ A minimal verification checklist is at the end of this README.
 ---
 
 ## 1) Architecture
-<!-- Standard Markdown -->
-![Architecture: GitHub → CI → ArgoCD → AKS](images/architecture.png)
 
 <!-- Center + size control (uses HTML, which GitHub supports) -->
 <p align="center">
