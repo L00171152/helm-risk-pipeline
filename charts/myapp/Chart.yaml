@@ -12,5 +12,5 @@ dependencies:
     version: "15.5.17"
     repository: "https://charts.bitnami.com/bitnami"
   - name: mysql
-    version: "12.2.1"
+    version: "14.0.3"
     repository: "https://charts.bitnami.com/bitnami"
