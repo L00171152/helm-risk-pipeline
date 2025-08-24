@@ -40,13 +40,14 @@ jobs:
             export TRIVY_CACHE_DIR="$RUNNER_TEMP/trivy-cache-$i"   # fresh dir => cold DB
             mkdir -p "$TRIVY_CACHE_DIR"
             start=$(date +%s)
-            trivy --download-db-only
+            trivy db --download                     # download/refresh DB (cold)
             trivy image --quiet --format json "$IMG" > "trivy-nocache-$i.json"
             end=$(date +%s)
             dur=$((end-start))
             echo "Run $i (nocache): ${dur}s" | tee -a $GITHUB_STEP_SUMMARY
             echo "$i,nocache,$dur" >> "$out"
           done
+          
 
       - name: Upload artifacts (nocache)
         uses: actions/upload-artifact@v4
@@ -87,16 +88,17 @@ jobs:
           set -e
           out="cache_benchmark_results.csv"
           if [ ! -f "$out" ]; then echo "run,mode,duration_seconds" > "$out"; fi
-          trivy --download-db-only  # should be fast with restored DB
+          # DB download is fast when restored from cache
           for i in $(seq 1 "$REPS"); do
             start=$(date +%s)
-            trivy --download-db-only
+            trivy db --download                     # quick update with warm cache
             trivy image --quiet --format json "$IMG" > "trivy-cache-$i.json"
             end=$(date +%s)
             dur=$((end-start))
             echo "Run $i (cache): ${dur}s" | tee -a $GITHUB_STEP_SUMMARY
             echo "$i,cache,$dur" >> "$out"
           done
+
 
       - name: Upload artifacts (cache)
         uses: actions/upload-artifact@v4
