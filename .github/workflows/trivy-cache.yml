@@ -1,0 +1,32 @@
+name: Trivy Scan Caching Test
+
+on:
+  workflow_dispatch:   # run manually for testing
+
+jobs:
+  scan-nocache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run Trivy without cache
+        run: |
+          start=$(date +%s)
+          trivy image --quiet --format json nginx:latest > trivy-nocache.json
+          end=$(date +%s)
+          echo "Duration: $((end-start)) seconds" >> $GITHUB_STEP_SUMMARY
+
+  scan-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Cache Trivy DB
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}
+      - name: Run Trivy with cache
+        run: |
+          start=$(date +%s)
+          trivy image --quiet --format json nginx:latest > trivy-cache.json
+          end=$(date +%s)
+          echo "Duration: $((end-start)) seconds" >> $GITHUB_STEP_SUMMARY
