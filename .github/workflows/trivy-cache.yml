@@ -1,32 +1,56 @@
 name: Trivy Scan Caching Test
-
 on:
-  workflow_dispatch:   # run manually for testing
+  workflow_dispatch:
 
 jobs:
-  scan-nocache:
+  # 1) Uncached baseline
+  scan_nocache:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Run Trivy without cache
+      - uses: actions/checkout@v4
+      - name: Run Trivy (no cache)
+        id: nocache
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: nginx:latest
+          format: json
+          output: trivy-nocache.json
+          vuln-type: 'os,library'
+          ignore-unfixed: false
+        env:
+          # force Trivy to download DB freshly into a temp dir so we don't benefit from cache
+          TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
+      - name: Record duration
+        if: always()
         run: |
-          start=$(date +%s)
-          trivy image --quiet --format json nginx:latest > trivy-nocache.json
-          end=$(date +%s)
-          echo "Duration: $((end-start)) seconds" >> $GITHUB_STEP_SUMMARY
+          echo "nocache_duration_seconds=${{ steps.nocache.outputs.duration }}" >> $GITHUB_OUTPUT
+        shell: bash
 
-  scan-cache:
+  # 2) Cached run
+  scan_cached:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Cache Trivy DB
-        uses: actions/cache@v3
+      - uses: actions/checkout@v4
+      - name: Restore Trivy DB cache
+        uses: actions/cache@v4
         with:
           path: ~/.cache/trivy
           key: trivy-db-${{ runner.os }}
-      - name: Run Trivy with cache
-        run: |
-          start=$(date +%s)
-          trivy image --quiet --format json nginx:latest > trivy-cache.json
-          end=$(date +%s)
-          echo "Duration: $((end-start)) seconds" >> $GITHUB_STEP_SUMMARY
+          restore-keys: |
+            trivy-db-
+      - name: Run Trivy (cached)
+        id: cached
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: nginx:latest
+          format: json
+          output: trivy-cached.json
+          vuln-type: 'os,library'
+          ignore-unfixed: false
+      - name: Save artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-outputs
+          path: |
+            trivy-nocache.json
+            trivy-cached.json
