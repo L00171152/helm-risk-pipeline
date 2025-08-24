@@ -63,7 +63,7 @@ jobs:
     name: Cached runs
     runs-on: ubuntu-latest
     env:
-      TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
+      TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache   # writable path
     steps:
       - uses: actions/checkout@v4
 
