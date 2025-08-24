@@ -2,13 +2,32 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:base"],
   "dependencyDashboard": true,
+  "prConcurrentLimit": 2,
   "recreateClosed": true,
   "packageRules": [
-    { "matchManagers": ["helmv3"], "separateMinorPatch": true, "automerge": false },
+    {
+      "matchManagers": ["helmv3"],
+      "separateMinorPatch": true,
+      "automerge": false
+    },
 
-    { "matchManagers": ["helmv3"], "matchPackageNames": ["mysql"],       "prTitle": "chore(helm): bump mysql to {{newVersion}}",       "labels": ["area/helm","chart/mysql"] },
-    { "matchManagers": ["helmv3"], "matchPackageNames": ["postgresql"],  "prTitle": "chore(helm): bump postgresql to {{newVersion}}",  "labels": ["area/helm","chart/postgresql"] },
-    { "matchManagers": ["helmv3"], "matchPackageNames": ["redis"],       "prTitle": "chore(helm): bump redis to {{newVersion}}",       "labels": ["area/helm","chart/redis"] }
+    {
+      "matchManagers": ["helmv3"],
+      "matchDepNames": ["mysql"],
+      "prTitle": "chore(helm): bump mysql to {{newVersion}}",
+      "labels": ["area/helm", "chart/mysql"]
+    },
+    {
+      "matchManagers": ["helmv3"],
+      "matchDepNames": ["postgresql"],
+      "prTitle": "chore(helm): bump postgresql to {{newVersion}}",
+      "labels": ["area/helm", "chart/postgresql"]
+    },
+    {
+      "matchManagers": ["helmv3"],
+      "matchDepNames": ["redis"],
+      "prTitle": "chore(helm): bump redis to {{newVersion}}",
+      "labels": ["area/helm", "chart/redis"]
+    }
   ]
 }
-
