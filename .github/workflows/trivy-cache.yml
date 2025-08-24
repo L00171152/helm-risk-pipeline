@@ -19,19 +19,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # --- Install Trivy (binary download; no apt repo needed) ---
-      - name: Install Trivy (latest release)
+      - name: Install Trivy (official installer)
         run: |
           set -e
-          wget -O trivy.tar.gz \
-            "https://github.com/aquasecurity/trivy/releases/latest/download/trivy_$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m).tar.gz"
-          tar zxvf trivy.tar.gz
-          sudo mv trivy /usr/local/bin/
+          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh -o install.sh
+          sh install.sh -b ./bin
+          sudo mv ./bin/trivy /usr/local/bin/trivy
           trivy --version
 
-      # --- Run N times with a fresh cache dir each time (true "nocache") ---
       - name: Benchmark (no cache)
-        id: bench
         shell: bash
         env:
           REPS: ${{ github.event.inputs.repetitions }}
@@ -41,17 +37,16 @@ jobs:
           out="cache_benchmark_results.csv"
           echo "run,mode,duration_seconds" > "$out"
           for i in $(seq 1 "$REPS"); do
-            export TRIVY_CACHE_DIR="$RUNNER_TEMP/trivy-cache-$i"
+            export TRIVY_CACHE_DIR="$RUNNER_TEMP/trivy-cache-$i"   # fresh dir => cold DB
             mkdir -p "$TRIVY_CACHE_DIR"
             start=$(date +%s)
             trivy --download-db-only
             trivy image --quiet --format json "$IMG" > "trivy-nocache-$i.json"
             end=$(date +%s)
             dur=$((end-start))
-            echo "Run $i (nocache): ${dur}s"
+            echo "Run $i (nocache): ${dur}s" | tee -a $GITHUB_STEP_SUMMARY
             echo "$i,nocache,$dur" >> "$out"
           done
-          echo "Created $out with $REPS rows (nocache mode)." | tee -a $GITHUB_STEP_SUMMARY
 
       - name: Upload artifacts (nocache)
         uses: actions/upload-artifact@v4
@@ -67,26 +62,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Trivy (latest release)
+      - name: Install Trivy (official installer)
         run: |
           set -e
-          wget -O trivy.tar.gz \
-            "https://github.com/aquasecurity/trivy/releases/latest/download/trivy_$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m).tar.gz"
-          tar zxvf trivy.tar.gz
-          sudo mv trivy /usr/local/bin/
+          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh -o install.sh
+          sh install.sh -b ./bin
+          sudo mv ./bin/trivy /usr/local/bin/trivy
           trivy --version
 
-      # Warm cache across the job
       - name: Restore Trivy DB cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/trivy
           key: trivy-db-${{ runner.os }}-v1
-          restore-keys: |
-            trivy-db-
+          restore-keys: trivy-db-
 
       - name: Benchmark (cached)
-        id: bench
         shell: bash
         env:
           REPS: ${{ github.event.inputs.repetitions }}
@@ -95,20 +86,17 @@ jobs:
         run: |
           set -e
           out="cache_benchmark_results.csv"
-          # append to existing or create
           if [ ! -f "$out" ]; then echo "run,mode,duration_seconds" > "$out"; fi
-          # Ensure DB is present (fast when restored from cache)
-          trivy --download-db-only
+          trivy --download-db-only  # should be fast with restored DB
           for i in $(seq 1 "$REPS"); do
             start=$(date +%s)
             trivy --download-db-only
             trivy image --quiet --format json "$IMG" > "trivy-cache-$i.json"
             end=$(date +%s)
             dur=$((end-start))
-            echo "Run $i (cache): ${dur}s"
+            echo "Run $i (cache): ${dur}s" | tee -a $GITHUB_STEP_SUMMARY
             echo "$i,cache,$dur" >> "$out"
           done
-          echo "Appended $REPS rows (cache mode) to $out." | tee -a $GITHUB_STEP_SUMMARY
 
       - name: Upload artifacts (cache)
         uses: actions/upload-artifact@v4
@@ -117,4 +105,3 @@ jobs:
           path: |
             cache_benchmark_results.csv
             trivy-cache-*.json
- 
