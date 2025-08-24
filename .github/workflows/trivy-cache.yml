@@ -1,56 +1,86 @@
-name: Trivy Scan Caching Test
+name: Trivy Cache Benchmark
 on:
   workflow_dispatch:
+    inputs:
+      repetitions:
+        description: "How many runs per mode"
+        required: true
+        default: "5"
 
 jobs:
-  # 1) Uncached baseline
-  scan_nocache:
+  benchmark:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [nocache, cache]
+        runid: [1,2,3,4,5]   # will be trimmed by repetitions input below
     steps:
       - uses: actions/checkout@v4
-      - name: Run Trivy (no cache)
-        id: nocache
-        uses: aquasecurity/trivy-action@0.20.0
-        with:
-          image-ref: nginx:latest
-          format: json
-          output: trivy-nocache.json
-          vuln-type: 'os,library'
-          ignore-unfixed: false
-        env:
-          # force Trivy to download DB freshly into a temp dir so we don't benefit from cache
-          TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
-      - name: Record duration
-        if: always()
-        run: |
-          echo "nocache_duration_seconds=${{ steps.nocache.outputs.duration }}" >> $GITHUB_OUTPUT
-        shell: bash
 
-  # 2) Cached run
-  scan_cached:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore Trivy DB cache
+      - name: Trim repetitions (optional)
+        if: ${{ fromJSON(inputs.repetitions) < 5 }}
+        run: |
+          echo "NOTE: set repetitions=${{ inputs.repetitions }}" 
+          # Nothing else needed; we'll just ignore extra rows in analysis.
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y wget
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo deb https://aquasecurity.github.io/trivy-repo/deb stable main | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update -y && sudo apt-get install -y trivy
+          trivy --version
+
+      # Use a fresh temp cache dir for "nocache" so it always downloads DB
+      - name: Configure cache mode
+        id: cfg
+        run: |
+          if [ "${{ matrix.mode }}" = "cache" ]; then
+            echo "TRIVY_CACHE_DIR=$HOME/.cache/trivy" >> $GITHUB_ENV
+            echo "CACHED=true" >> $GITHUB_OUTPUT
+          else
+            echo "TRIVY_CACHE_DIR=$RUNNER_TEMP/trivy-cache-${{ matrix.runid }}" >> $GITHUB_ENV
+            echo "CACHED=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Restore Trivy DB cache (only for cached mode)
+        if: steps.cfg.outputs.CACHED == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/trivy
-          key: trivy-db-${{ runner.os }}
-          restore-keys: |
-            trivy-db-
-      - name: Run Trivy (cached)
-        id: cached
-        uses: aquasecurity/trivy-action@0.20.0
-        with:
-          image-ref: nginx:latest
-          format: json
-          output: trivy-cached.json
-          vuln-type: 'os,library'
-          ignore-unfixed: false
-      - name: Save artifacts
+          key: trivy-db-${{ runner.os }}-v1
+          restore-keys: trivy-db-
+
+      - name: Run scan and time it
+        id: scan
+        shell: bash
+        run: |
+          set -e
+          start=$(date +%s)
+          # Ensure DB present (fast if restored, slow if nocache)
+          trivy --download-db-only
+          # Scan a stable public image; you can swap nginx:latest for your test image
+          trivy image --quiet --format json nginx:latest > trivy-${{ matrix.mode }}-${{ matrix.runid }}.json
+          end=$(date +%s)
+          dur=$((end-start))
+          echo "duration_seconds=$dur" >> $GITHUB_OUTPUT
+          echo "Run ${{ matrix.runid }} (${{ matrix.mode }}): ${dur}s" | tee -a $GITHUB_STEP_SUMMARY
+
+      - name: Append to CSV (creates if missing)
+        run: |
+          out="cache_benchmark_results.csv"
+          if [ ! -f "$out" ]; then
+            echo "run,mode,duration_seconds" > "$out"
+          fi
+          echo "${{ matrix.runid }},${{ matrix.mode }},${{ steps.scan.outputs.duration_seconds }}" >> "$out"
+
+      - name: Upload artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-outputs
+          name: trivy-cache-benchmark
           path: |
-            trivy-nocache.json
-            trivy-cached.json
+            cache_benchmark_results.csv
+            trivy-${{ matrix.mode }}-${{ matrix.runid }}.json
