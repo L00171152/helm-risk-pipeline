@@ -27,7 +27,6 @@ jobs:
           sudo mv ./bin/trivy /usr/local/bin/trivy
           trivy --version
 
-
       - name: Benchmark (no cache)
         shell: bash
         env:
@@ -38,18 +37,16 @@ jobs:
           out="cache_benchmark_results.csv"
           echo "run,mode,duration_seconds" > "$out"
           for i in $(seq 1 "$REPS"); do
-            export TRIVY_CACHE_DIR="$RUNNER_TEMP/trivy-cache-$i"
-            rm -rf "$TRIVY_CACHE_DIR"         # ensure fresh DB
+            TRIVY_CACHE_DIR="${GITHUB_WORKSPACE}/.trivy-cache-run-${i}"
+            rm -rf "$TRIVY_CACHE_DIR"
             mkdir -p "$TRIVY_CACHE_DIR"
             start=$(date +%s)
-            trivy image --quiet --format json "$IMG" > "trivy-nocache-$i.json"
+            trivy image --quiet --cache-dir "$TRIVY_CACHE_DIR" --format json "$IMG" > "trivy-nocache-$i.json"
             end=$(date +%s)
             dur=$((end-start))
-            echo "Run $i (nocache): ${dur}s" | tee -a $GITHUB_STEP_SUMMARY
+            echo "Run $i (nocache): ${dur}s" | tee -a "$GITHUB_STEP_SUMMARY"
             echo "$i,nocache,$dur" >> "$out"
           done
-
-          
 
       - name: Upload artifacts (nocache)
         uses: actions/upload-artifact@v4
@@ -63,7 +60,8 @@ jobs:
     name: Cached runs
     runs-on: ubuntu-latest
     env:
-      TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache   # writable path
+      # Use a stable, writable path inside the workspace (avoids runner.* context issues)
+      TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivy-cache
     steps:
       - uses: actions/checkout@v4
 
@@ -74,7 +72,7 @@ jobs:
           sh install.sh -b ./bin
           sudo mv ./bin/trivy /usr/local/bin/trivy
           trivy --version
-        
+
       - name: Ensure cache dir exists
         run: mkdir -p "$TRIVY_CACHE_DIR"
 
@@ -84,7 +82,7 @@ jobs:
           path: ${{ env.TRIVY_CACHE_DIR }}
           key: trivy-db-${{ runner.os }}-v1
           restore-keys: trivy-db-
-    
+
       - name: Prefetch DB (cached)
         run: trivy image --download-db-only --cache-dir "$TRIVY_CACHE_DIR"
 
@@ -102,11 +100,9 @@ jobs:
             trivy image --quiet --cache-dir "$TRIVY_CACHE_DIR" --format json "$IMG" > "trivy-cache-$i.json"
             end=$(date +%s)
             dur=$((end-start))
-            echo "Run $i (cache): ${dur}s" | tee -a $GITHUB_STEP_SUMMARY
+            echo "Run $i (cache): ${dur}s" | tee -a "$GITHUB_STEP_SUMMARY"
             echo "$i,cache,$dur" >> "$out"
           done
-
-
 
       - name: Upload artifacts (cache)
         uses: actions/upload-artifact@v4
