@@ -19,13 +19,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Trivy (official installer)
+      - name: Install Trivy (APT)
         run: |
           set -e
-          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh -o install.sh
-          sh install.sh -b ./bin
-          sudo mv ./bin/trivy /usr/local/bin/trivy
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/setup.sh | sudo -E sh
+          sudo apt-get update
+          sudo apt-get install -y trivy
           trivy --version
+
 
       - name: Benchmark (no cache)
         shell: bash
@@ -64,12 +65,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Trivy (official installer)
+      - name: Install Trivy (APT)
         run: |
           set -e
-          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh -o install.sh
-          sh install.sh -b ./bin
-          sudo mv ./bin/trivy /usr/local/bin/trivy
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/setup.sh | sudo -E sh
+          sudo apt-get update
+          sudo apt-get install -y trivy
           trivy --version
 
       - name: Restore Trivy DB cache
