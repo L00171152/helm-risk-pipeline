@@ -62,6 +62,8 @@ jobs:
   cache:
     name: Cached runs
     runs-on: ubuntu-latest
+    env:
+      TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
     steps:
       - uses: actions/checkout@v4
 
@@ -72,27 +74,32 @@ jobs:
           sh install.sh -b ./bin
           sudo mv ./bin/trivy /usr/local/bin/trivy
           trivy --version
+        
+      - name: Ensure cache dir exists
+        run: mkdir -p "$TRIVY_CACHE_DIR"
 
       - name: Restore Trivy DB cache
         uses: actions/cache@v4
         with:
-          path: ~/.cache/trivy
+          path: ${{ env.TRIVY_CACHE_DIR }}
           key: trivy-db-${{ runner.os }}-v1
           restore-keys: trivy-db-
+    
+      - name: Prefetch DB (cached)
+        run: trivy image --download-db-only --cache-dir "$TRIVY_CACHE_DIR"
 
       - name: Benchmark (cached)
         shell: bash
         env:
           REPS: ${{ github.event.inputs.repetitions }}
           IMG:  ${{ github.event.inputs.imageRef }}
-          TRIVY_CACHE_DIR: ${{ runner.home }}/.cache/trivy
         run: |
           set -e
           out="cache_benchmark_results.csv"
           if [ ! -f "$out" ]; then echo "run,mode,duration_seconds" > "$out"; fi
           for i in $(seq 1 "$REPS"); do
             start=$(date +%s)
-            trivy image --quiet --format json "$IMG" > "trivy-cache-$i.json"
+            trivy image --quiet --cache-dir "$TRIVY_CACHE_DIR" --format json "$IMG" > "trivy-cache-$i.json"
             end=$(date +%s)
             dur=$((end-start))
             echo "Run $i (cache): ${dur}s" | tee -a $GITHUB_STEP_SUMMARY
